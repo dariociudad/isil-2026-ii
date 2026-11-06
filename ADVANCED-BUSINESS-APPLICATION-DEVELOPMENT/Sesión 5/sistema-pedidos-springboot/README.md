@@ -630,5 +630,100 @@ Para ejecutar toda la suite:
 - [Spring Boot — Reference Documentation](https://docs.spring.io/spring-boot/reference/)
 
 ---
+---
 
+## 14. PA3 — Módulo de consulta y supervisión de pedidos
+
+La PA3 agrega al módulo de reportes dos consultas nuevas con **Spring JDBC** (`NamedParameterJdbcTemplate`, SQL parametrizado), una vista **JSP** protegida (`/reportes/pedidos`) y dos endpoints **JSON**, todos sobre la misma capa Service. Spring Data JPA se mantiene para registrar pedidos.
+
+### Tecnologías y requisitos
+
+- Spring Boot, Spring MVC + JSP, Spring Security, Spring Data JPA y Spring JDBC.
+- MySQL en ejecución normal; H2 solo para las pruebas automatizadas.
+- JUnit 5, Mockito y MockMvc.
+- Maven (`mvnw` incluido) y el JDK indicado en `pom.xml`.
+- `inventario-service` (WildFly 41, SQL Server) en `http://localhost:8082`, necesario solo para **registrar** pedidos.
+
+### Base de datos y variables de entorno
+
+1. Crear la base y el usuario de laboratorio ejecutando `Script_BD_usuario_MySql.sql` en MySQL.
+2. Externalizar las credenciales (no se guardan claves reales en el repositorio):
+
+```powershell
+$env:DB_URL = "jdbc:mysql://localhost:3306/sistema_pedidos?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=America/Lima"
+$env:DB_USERNAME = "<usuario>"
+$env:DB_PASSWORD = "<clave-local>"
+$env:PEDIDOS_OPERADOR_PASSWORD = "<clave-local-segura>"
+$env:PEDIDOS_CONSULTA_PASSWORD = "<otra-clave-local-segura>"
+```
+
+### Orden de arranque
+
+1. Iniciar MySQL y SQL Server (verificar el puerto 1433).
+2. En `inventario-service`: `mvn clean wildfly:run` (HTTP 8082).
+3. En este proyecto: ejecutar `SistemaPedidosSpringbootApplication` (HTTP 8081, contexto `/sistema-pedidos`).
+
+### Usuarios de laboratorio
+
+| Usuario | Rol | Puede |
+|---|---|---|
+| `operador` | `OPERADOR` | Ver reportes y registrar pedidos (`POST /pedidos`) |
+| `consulta` | `CONSULTA` | Ver reportes; **no** puede registrar pedidos (403) |
+
+El usuario anónimo es redirigido a `/login`. CSRF permanece activo.
+
+### Rutas nuevas
+
+| Método y ruta | Descripción | Acceso |
+|---|---|---|
+| `GET /reportes/pedidos` | Vista JSP con resumen, búsqueda avanzada y clientes frecuentes | OPERADOR, CONSULTA |
+| `GET /api/v1/pedidos/busqueda-avanzada?cliente={valor}&totalMinimo={monto}` | Pedidos del cliente con total ≥ monto, orden `id DESC` | OPERADOR, CONSULTA |
+| `GET /api/v1/pedidos/clientes-frecuentes?minPedidos={n}` | Clientes con al menos `n` pedidos (`GROUP BY` / `HAVING`) | OPERADOR, CONSULTA |
+
+### Ejemplos
+
+Con sesión iniciada (por ejemplo en el navegador):
+
+```text
+http://localhost:8081/sistema-pedidos/reportes/pedidos
+http://localhost:8081/sistema-pedidos/api/v1/pedidos/busqueda-avanzada?cliente=Ana&totalMinimo=500
+http://localhost:8081/sistema-pedidos/api/v1/pedidos/clientes-frecuentes?minPedidos=2
+```
+
+Respuesta de ejemplo de `clientes-frecuentes?minPedidos=2`:
+
+```json
+[{"cliente":"ana torres","totalPedidos":6,"totalUnidades":6,"importeAcumulado":5290.00,"ticketPromedio":881.67},
+ {"cliente":"luis perez","totalPedidos":2,"totalUnidades":2,"importeAcumulado":3350.00,"ticketPromedio":1675.00}]
+```
+
+Parámetros inválidos (HTTP 400, sin ejecutar SQL):
+
+| Petición | Mensaje |
+|---|---|
+| `busqueda-avanzada?cliente=&totalMinimo=100` | El cliente es obligatorio. |
+| `busqueda-avanzada?cliente=Ana&totalMinimo=-5` | El total mínimo debe ser mayor o igual a cero. |
+| `clientes-frecuentes?minPedidos=0` | El mínimo de pedidos debe ser mayor o igual a 1. |
+
+### Pruebas nuevas de la PA3
+
+Ejecutar desde la raíz del proyecto:
+
+```powershell
+mvn test
+```
+
+| Clase | Qué verifica |
+|---|---|
+| `PedidoReportePa3RepositoryTest` | Búsqueda avanzada y clientes frecuentes con H2 |
+| `PedidoReporteServicePa3Test` | Validación de parámetros inválidos (Mockito) |
+| `PedidoReportePa3SecurityTest` | CONSULTA accede al reporte, anónimo es redirigido, CONSULTA no registra pedidos (403) y `minPedidos=0` responde 400 |
+
+Resultado: `Tests run: 29, Failures: 0, Errors: 0, Skipped: 0` — `BUILD SUCCESS`.
+
+### Limitaciones
+
+- Los usuarios de laboratorio no se guardan en base de datos (no hay JWT ni OAuth2).
+- Los reportes no tienen paginación.
+- Registrar pedidos requiere `inventario-service` disponible; los reportes solo consultan MySQL y siguen funcionando si el servicio está detenido.
 **Uso académico:** curso *Desarrollo de Aplicaciones Empresariales Avanzado* · Continuidad del caso **Sistema de Pedidos** · Sesiones 7 y 9: **Spring MVC, Seguridad con Spring y Spring JDBC**.
